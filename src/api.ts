@@ -363,6 +363,188 @@ app.post('/api/internal/logs', validateInternalSecret, express.json(), (req, res
     res.json({ success: true });
 });
 
+// ─── Internal Generation Endpoints (called by Backend, handled by Generation Engine) ───
+// These endpoints receive delegated generation tasks and run the actual AI pipelines
+
+app.post('/api/internal/generate/image', validateInternalSecret, async (req, res) => {
+    const { userId, userPrompt, productImageUrl, characterImageUrl, coreId, coreName, style, aspectRatio, generationId, modelId, useBrandColors, brandColors, contextAntiRepeticao, currentIndex, totalItems, includeText } = req.body;
+    console.log(`[Engine] 🖼️ Received image generation task: ${generationId} (Core: ${coreId}, Style: ${style})`);
+    
+    // Respond immediately so the backend doesn't timeout
+    res.json({ success: true, message: 'Image generation started', generationId });
+
+    // Run pipeline in background
+    try {
+        const { ImagePipeline } = await import('./pipeline/ImagePipeline.js');
+        await ImagePipeline.run({
+            userId,
+            userPrompt: userPrompt || '',
+            productImageUrl,
+            coreId,
+            coreName,
+            style,
+            aspectRatio: aspectRatio || '1:1',
+            generationId
+        });
+        console.log(`[Engine] ✅ Image pipeline completed for ${generationId}`);
+    } catch (err: any) {
+        console.error(`[Engine] ❌ Image pipeline failed for ${generationId}:`, err.message);
+        // Update DB with failure status
+        try {
+            await query(
+                `UPDATE generations SET status = 'failed', metadata = metadata || $1, updated_at = NOW() WHERE id = $2`,
+                [JSON.stringify({ error: err.message }), generationId]
+            );
+        } catch (dbErr) {
+            console.error(`[Engine] DB update error:`, dbErr);
+        }
+    }
+});
+
+app.post('/api/internal/generate/video', validateInternalSecret, async (req, res) => {
+    const { userId, userPrompt, productImageUrl, coreId, coreName, modelId, aspectRatio, generationId, useBrandColors, brandColors, currentIndex, totalItems } = req.body;
+    console.log(`[Engine] 🎬 Received video generation task: ${generationId} (Core: ${coreId}, Model: ${modelId})`);
+    
+    // Respond immediately
+    res.json({ success: true, message: 'Video generation started', generationId });
+
+    // Run video generation in background
+    try {
+        const { KieAiNode } = await import('./pipeline/nodes/KieAiNode.js');
+        
+        // Update status
+        await query(`UPDATE generations SET metadata = metadata || $1 WHERE id = $2`,
+            [JSON.stringify({ pipeline_status: 'Gerando vídeo publicitário...', pipeline_progress: 30 }), generationId]);
+
+        // Build prompt with video analysis if image is provided
+        let finalPrompt = userPrompt || '';
+        if (productImageUrl) {
+            try {
+                const { VideoAnalysisAgent } = await import('./pipeline/agents/video/VideoAnalysisAgent.js');
+                const analysis = await VideoAnalysisAgent.analyze(productImageUrl);
+                
+                const { VideoPromptAgent } = await import('./pipeline/agents/video/VideoPromptAgent.js');
+                const { SeedSystem } = await import('./pipeline/utils/SeedSystem.js');
+                const seed = SeedSystem.generateSeed();
+                const promptResult = await VideoPromptAgent.generate({
+                    analysis,
+                    userPrompt: userPrompt || '',
+                    aspectRatio: aspectRatio || '16:9',
+                    seed,
+                    useBrandColors,
+                    brandColors
+                });
+                finalPrompt = JSON.stringify(promptResult);
+            } catch (promptErr: any) {
+                console.warn(`[Engine] Video prompt generation failed, using raw prompt:`, promptErr.message);
+            }
+        }
+
+        // Create KIE.ai task
+        await query(`UPDATE generations SET metadata = metadata || $1 WHERE id = $2`,
+            [JSON.stringify({ pipeline_status: 'Processando vídeo na nuvem...', pipeline_progress: 50 }), generationId]);
+
+        const taskId = await KieAiNode.createTask({
+            model: modelId || 'google/veo-3.1-generate',
+            prompt: finalPrompt,
+            imageUrls: productImageUrl ? [productImageUrl] : [],
+            aspectRatio: aspectRatio || '16:9'
+        });
+
+        // Poll for result
+        await query(`UPDATE generations SET metadata = metadata || $1 WHERE id = $2`,
+            [JSON.stringify({ pipeline_status: 'Finalizando vídeo...', pipeline_progress: 70 }), generationId]);
+
+        const resultUrl = await KieAiNode.pollJobStatus(taskId, 15);
+
+        // Update DB with success
+        await query(
+            `UPDATE generations SET result_url = $1, status = 'completed', metadata = metadata || $2, updated_at = NOW() WHERE id = $3`,
+            [resultUrl, JSON.stringify({ pipeline_status: 'Concluído', pipeline_progress: 100 }), generationId]
+        );
+        console.log(`[Engine] ✅ Video pipeline completed for ${generationId}`);
+
+    } catch (err: any) {
+        console.error(`[Engine] ❌ Video pipeline failed for ${generationId}:`, err.message);
+        try {
+            await query(
+                `UPDATE generations SET status = 'failed', metadata = metadata || $1, updated_at = NOW() WHERE id = $2`,
+                [JSON.stringify({ error: err.message }), generationId]
+            );
+        } catch (dbErr) {
+            console.error(`[Engine] DB update error:`, dbErr);
+        }
+    }
+});
+
+app.post('/api/internal/generate/audio', validateInternalSecret, async (req, res) => {
+    const { userId, generationId, prompt, userPrompt, style, model, instrumental, backendUrl } = req.body;
+    console.log(`[Engine] 🎵 Received audio/music generation task: ${generationId} (Model: ${model}, Style: ${style})`);
+    
+    // Respond immediately
+    res.json({ success: true, message: 'Audio generation started', generationId });
+
+    // Run music generation in background
+    try {
+        const { KieAiNode } = await import('./pipeline/nodes/KieAiNode.js');
+        
+        await query(`UPDATE generations SET metadata = metadata || $1 WHERE id = $2`,
+            [JSON.stringify({ pipeline_status: 'Compondo música...', pipeline_progress: 20 }), generationId]);
+
+        // Build music prompt
+        const musicPrompt = `${prompt || userPrompt}. Style: ${style || 'pop'}. ${instrumental ? 'Instrumental only, no vocals.' : 'With vocals in Portuguese.'}`;
+
+        // Create KIE.ai task for music
+        const taskId = await KieAiNode.createTask({
+            model: model || 'suno/v4',
+            prompt: musicPrompt
+        });
+
+        await query(`UPDATE generations SET metadata = metadata || $1 WHERE id = $2`,
+            [JSON.stringify({ pipeline_status: 'Gerando faixas de áudio...', pipeline_progress: 50 }), generationId]);
+
+        // Poll for result
+        const resultUrl = await KieAiNode.pollJobStatus(taskId, 15);
+
+        // Send callback to backend for storage processing
+        const callbackUrl = backendUrl || process.env.PUBLIC_URL || 'http://localhost:3003';
+        const INTERNAL_SECRET = process.env.INTERNAL_SECRET;
+        
+        try {
+            await axios.post(`${callbackUrl}/api/internal/generation-callback`, {
+                generationId,
+                status: 'completed',
+                audio_url: resultUrl,
+                audio_urls: [resultUrl],
+                pipeline_status: 'Concluído',
+                pipeline_progress: 100
+            }, {
+                headers: { 'X-Internal-Secret': INTERNAL_SECRET }
+            });
+        } catch (cbErr: any) {
+            // If callback fails, update DB directly
+            console.warn(`[Engine] Callback failed, updating DB directly:`, cbErr.message);
+            await query(
+                `UPDATE generations SET result_url = $1, status = 'completed', metadata = metadata || $2, updated_at = NOW() WHERE id = $3`,
+                [resultUrl, JSON.stringify({ pipeline_status: 'Concluído', pipeline_progress: 100 }), generationId]
+            );
+        }
+
+        console.log(`[Engine] ✅ Audio pipeline completed for ${generationId}`);
+
+    } catch (err: any) {
+        console.error(`[Engine] ❌ Audio pipeline failed for ${generationId}:`, err.message);
+        try {
+            await query(
+                `UPDATE generations SET status = 'failed', metadata = metadata || $1, updated_at = NOW() WHERE id = $2`,
+                [JSON.stringify({ error: err.message }), generationId]
+            );
+        } catch (dbErr) {
+            console.error(`[Engine] DB update error:`, dbErr);
+        }
+    }
+});
+
 // ─── KIE.ai Direct Callback (called by KIE.ai when generation completes) ─────
 // This is also called by our ImagePipeline after polling finishes
 app.post('/api/internal/generation-callback', validateInternalSecret, async (req, res) => {
