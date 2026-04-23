@@ -75,22 +75,6 @@ export class ImagePipeline {
                 [JSON.stringify({ error: error.message }), options.generationId]
             );
 
-            // Notify backend about failure to trigger credit refund
-            try {
-                const axios = (await import('axios')).default;
-                const callbackUrl = process.env.PUBLIC_URL || 'http://localhost:8000';
-                await axios.post(`${callbackUrl}/api/internal/generation-callback`, {
-                    generationId: options.generationId,
-                    status: 'failed',
-                    pipeline_status: 'Falha na geração',
-                    error: error.message
-                }, {
-                    headers: { 'X-Internal-Secret': process.env.INTERNAL_SECRET }
-                });
-            } catch (cbErr: any) {
-                console.warn(`[ImagePipeline] Failed to notify backend of failure:`, cbErr.message);
-            }
-
             throw error;
         }
     }
