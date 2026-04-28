@@ -88,6 +88,7 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
+const PORT = process.env.PORT || 3003;
 const SERVICE_TYPE = process.env.SERVICE_TYPE || 'BACKEND';
 
 // Trust Proxy for Easypanel/Nginx
@@ -8721,8 +8722,9 @@ app.use((err: any, _req: any, res: any, next: any) => {
 
 const PORT = process.env.PORT || 3003;
 
-const server = app.listen(PORT, () => {
-    console.log(`[Conversio API] Server rodando em http://localhost:${PORT}`);
+const ENGINE_VERSION = '2026.04.28.1518';
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[${SERVICE_TYPE}] 🚀 Conversio AI ${SERVICE_TYPE} v${ENGINE_VERSION} running on port ${PORT}`);
     initAdminDb(); // Run admin tables init on startup
     
     // ─── AGENTES DE BACKGROUND (Orquestrador, Monitor, Cron) ─────────────────────
