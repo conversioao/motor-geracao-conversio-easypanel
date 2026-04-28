@@ -4,9 +4,7 @@ import { query } from '../db.js';
 
 dotenv.config();
 
-const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || '';
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
-const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || '';
+import { getConfig } from '../config.js';
 
 export const sendWhatsAppMessage = async (
     number: string, 
@@ -16,6 +14,10 @@ export const sendWhatsAppMessage = async (
     userId: string | null = null,
     campaignId: number | null = null
 ) => {
+    const EVOLUTION_API_URL = await getConfig('EVOLUTION_API_URL');
+    const EVOLUTION_API_KEY = await getConfig('EVOLUTION_API_KEY');
+    const EVOLUTION_INSTANCE = await getConfig('EVOLUTION_INSTANCE');
+
     if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY || !EVOLUTION_INSTANCE) {
         console.error('Evolution API credentials missing');
         return { success: false, error: 'Configuração da API WhatsApp ausente' };
@@ -85,6 +87,10 @@ export const sendWhatsAppDocument = async (
     userId: string | null = null,
     campaignId: number | null = null
 ) => {
+    const EVOLUTION_API_URL = await getConfig('EVOLUTION_API_URL');
+    const EVOLUTION_API_KEY = await getConfig('EVOLUTION_API_KEY');
+    const EVOLUTION_INSTANCE = await getConfig('EVOLUTION_INSTANCE');
+
     if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY || !EVOLUTION_INSTANCE) {
         console.error('Evolution API credentials missing for document');
         return { success: false, error: 'Configuração da API WhatsApp ausente' };
@@ -151,6 +157,10 @@ export const sendWhatsAppVideo = async (
     userId: string | null = null,
     campaignId: number | null = null
 ) => {
+    const EVOLUTION_API_URL = await getConfig('EVOLUTION_API_URL');
+    const EVOLUTION_API_KEY = await getConfig('EVOLUTION_API_KEY');
+    const EVOLUTION_INSTANCE = await getConfig('EVOLUTION_INSTANCE');
+
     if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY || !EVOLUTION_INSTANCE) {
         console.error('Evolution API credentials missing for video');
         return { success: false, error: 'Configuração da API WhatsApp ausente' };
@@ -211,6 +221,10 @@ export const sendWhatsAppImage = async (
     userId: string | null = null,
     campaignId: number | null = null
 ) => {
+    const EVOLUTION_API_URL = await getConfig('EVOLUTION_API_URL');
+    const EVOLUTION_API_KEY = await getConfig('EVOLUTION_API_KEY');
+    const EVOLUTION_INSTANCE = await getConfig('EVOLUTION_INSTANCE');
+
     if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY || !EVOLUTION_INSTANCE) {
         return { success: false, error: 'Configuração da API WhatsApp ausente' };
     }

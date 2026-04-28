@@ -97,9 +97,16 @@ export async function getConfig(key: string, defaultValue: string = ''): Promise
         'webhook_music': process.env.N8N_VOICE_WEBHOOK,
         'db_host': process.env.DB_HOST,
         'db_user': process.env.DB_USER,
-        'db_pass': process.env.DB_PASSWORD,
+        'db_pass': process.env.DB_PASS || process.env.DB_PASSWORD,
         'db_name': process.env.DB_NAME,
-        'db_port': process.env.DB_PORT
+        'db_port': process.env.DB_PORT,
+        'KIE_AI_API_KEY': process.env.KIE_AI_API_KEY,
+        'kie_ai_api_key': process.env.KIE_AI_API_KEY,
+        'OPENAI_API_KEY': process.env.OPENAI_API_KEY,
+        'openai_api_key': process.env.OPENAI_API_KEY,
+        'EVOLUTION_API_URL': process.env.EVOLUTION_API_URL,
+        'EVOLUTION_API_KEY': process.env.EVOLUTION_API_KEY,
+        'EVOLUTION_INSTANCE': process.env.EVOLUTION_INSTANCE
     };
 
     return envMap[key] || defaultValue;

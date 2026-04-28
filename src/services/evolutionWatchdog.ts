@@ -7,10 +7,7 @@
  */
 
 import { getAdminWhatsApp } from './configService.js';
-
-const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || '';
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
-const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE || '';
+import { getConfig } from '../config.js';
 
 // Estado interno para anti-spam (não reiniciar em loop)
 let lastRestartAt: number | null = null;
@@ -18,26 +15,42 @@ let consecutiveFailures = 0;
 const MIN_RESTART_INTERVAL_MS = 3 * 60 * 1000; // 3 minutos entre restarts
 const MAX_CONSECUTIVE_FAILURES = 3; // Após 3 falhas seguidas, alerta crítico
 
+interface EvoConfig {
+    apiUrl: string;
+    apiKey: string;
+    instance: string;
+}
+
 // ─── Função principal (chamada pelo CRON) ───────────────────────────────────
 export const runEvolutionWatchdog = async (): Promise<void> => {
+    const EVOLUTION_API_URL = await getConfig('EVOLUTION_API_URL');
+    const EVOLUTION_API_KEY = await getConfig('EVOLUTION_API_KEY');
+    const EVOLUTION_INSTANCE = await getConfig('EVOLUTION_INSTANCE');
+
     if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY || !EVOLUTION_INSTANCE) {
         console.warn('[Evolution Watchdog] ⚠️ Configurações da API em falta. Watchdog desativado.');
         return;
     }
 
-    console.log(`[Evolution Watchdog] 🔍 Verificando instância "${EVOLUTION_INSTANCE}"...`);
+    const config: EvoConfig = {
+        apiUrl: EVOLUTION_API_URL,
+        apiKey: EVOLUTION_API_KEY,
+        instance: EVOLUTION_INSTANCE
+    };
+
+    console.log(`[Evolution Watchdog] 🔍 Verificando instância "${config.instance}"...`);
 
     try {
-        const state = await checkConnectionState();
+        const state = await checkConnectionState(config);
 
         if (state === 'open') {
-            console.log(`[Evolution Watchdog] ✅ Instância "${EVOLUTION_INSTANCE}" está CONECTADA (open).`);
+            console.log(`[Evolution Watchdog] ✅ Instância "${config.instance}" está CONECTADA (open).`);
             consecutiveFailures = 0;
             return;
         }
 
-        console.warn(`[Evolution Watchdog] ⚠️ Instância "${EVOLUTION_INSTANCE}" reporta estado: "${state}". Iniciando recuperação...`);
-        await handleDisconnection(state);
+        console.warn(`[Evolution Watchdog] ⚠️ Instância "${config.instance}" reporta estado: "${state}". Iniciando recuperação...`);
+        await handleDisconnection(state, config);
 
     } catch (err: any) {
         consecutiveFailures++;
@@ -49,7 +62,8 @@ export const runEvolutionWatchdog = async (): Promise<void> => {
                 `🚨 *ALERTA CRÍTICO — Evolution API*\n\n` +
                 `A ligação WhatsApp falhou ${consecutiveFailures}x seguidas.\n` +
                 `Último erro: ${err.message}\n\n` +
-                `Verifique o painel da Evolution API manualmente.`
+                `Verifique o painel da Evolution API manualmente.`,
+                config
             );
             consecutiveFailures = 0; // Reset para não spammar
         }
@@ -57,10 +71,10 @@ export const runEvolutionWatchdog = async (): Promise<void> => {
 };
 
 // ─── Verifica estado atual da instância ────────────────────────────────────
-async function checkConnectionState(): Promise<string> {
-    const url = `${EVOLUTION_API_URL}/instance/connectionState/${EVOLUTION_INSTANCE}`;
+async function checkConnectionState(config: EvoConfig): Promise<string> {
+    const url = `${config.apiUrl}/instance/connectionState/${config.instance}`;
     const res = await fetch(url, {
-        headers: { apikey: EVOLUTION_API_KEY },
+        headers: { apikey: config.apiKey },
         signal: AbortSignal.timeout(10000)
     });
 
@@ -73,7 +87,7 @@ async function checkConnectionState(): Promise<string> {
 }
 
 // ─── Lida com a desconexão: reinicia e testa ────────────────────────────────
-async function handleDisconnection(state: string): Promise<void> {
+async function handleDisconnection(state: string, config: EvoConfig): Promise<void> {
     const now = Date.now();
 
     // Anti-loop: evitar restarts muito seguidos
@@ -84,8 +98,8 @@ async function handleDisconnection(state: string): Promise<void> {
     }
 
     // 1. Reiniciar instância
-    console.log(`[Evolution Watchdog] 🔄 A reiniciar instância "${EVOLUTION_INSTANCE}"...`);
-    const restarted = await restartInstance();
+    console.log(`[Evolution Watchdog] 🔄 A reiniciar instância "${config.instance}"...`);
+    const restarted = await restartInstance(config);
 
     if (!restarted) {
         console.error('[Evolution Watchdog] ❌ Falha ao reiniciar. Vai tentar no próximo ciclo.');
@@ -99,37 +113,39 @@ async function handleDisconnection(state: string): Promise<void> {
     await sleep(8000);
 
     // 3. Verificar novo estado após restart
-    const newState = await checkConnectionState().catch(() => 'unknown');
+    const newState = await checkConnectionState(config).catch(() => 'unknown');
     console.log(`[Evolution Watchdog] 📡 Novo estado após restart: "${newState}"`);
 
     // 4. Enviar alerta ao admin com resultado
     if (newState === 'open') {
         await sendCriticalAlert(
             `🔄 *Watchdog — Recuperação Automática*\n\n` +
-            `A instância *${EVOLUTION_INSTANCE}* foi reiniciada com sucesso!\n\n` +
+            `A instância *${config.instance}* foi reiniciada com sucesso!\n\n` +
             `📌 Estado anterior: ${state}\n` +
             `✅ Estado atual: *Conectado (open)*\n\n` +
-            `_O sistema WhatsApp está de volta ao normal._`
+            `_O sistema WhatsApp está de volta ao normal._`,
+            config
         );
     } else {
         await sendCriticalAlert(
             `⚠️ *Watchdog — Restart Sem Sucesso*\n\n` +
-            `A instância *${EVOLUTION_INSTANCE}* foi reiniciada, mas o estado ainda não está normal.\n\n` +
+            `A instância *${config.instance}* foi reiniciada, mas o estado ainda não está normal.\n\n` +
             `📌 Estado anterior: ${state}\n` +
             `⚠️ Estado atual: *${newState}*\n\n` +
-            `Pode ser necessário fazer login (QR Code) manualmente no painel da Evolution API.`
+            `Pode ser necessário fazer login (QR Code) manualmente no painel da Evolution API.`,
+            config
         );
     }
 }
 
 // ─── Reinicia a instância via API ──────────────────────────────────────────
-async function restartInstance(): Promise<boolean> {
+async function restartInstance(config: EvoConfig): Promise<boolean> {
     try {
-        const url = `${EVOLUTION_API_URL}/instance/restart/${EVOLUTION_INSTANCE}`;
+        const url = `${config.apiUrl}/instance/restart/${config.instance}`;
         const res = await fetch(url, {
             method: 'PUT',
             headers: {
-                apikey: EVOLUTION_API_KEY,
+                apikey: config.apiKey,
                 'Content-Type': 'application/json'
             },
             signal: AbortSignal.timeout(15000)
@@ -145,7 +161,7 @@ async function restartInstance(): Promise<boolean> {
 }
 
 // ─── Envia alerta direto ao admin (sem depender do whatsappService para não criar loop) ──
-async function sendCriticalAlert(message: string): Promise<void> {
+async function sendCriticalAlert(message: string, config: EvoConfig): Promise<void> {
     try {
         const adminNumber = process.env.ADMIN_WHATSAPP || await getAdminWhatsApp();
         if (!adminNumber) {
@@ -154,12 +170,12 @@ async function sendCriticalAlert(message: string): Promise<void> {
         }
 
         const formattedNumber = adminNumber.replace(/\D/g, '');
-        const url = `${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`;
+        const url = `${config.apiUrl}/message/sendText/${config.instance}`;
 
         const res = await fetch(url, {
             method: 'POST',
             headers: {
-                apikey: EVOLUTION_API_KEY,
+                apikey: config.apiKey,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
